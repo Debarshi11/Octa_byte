@@ -59,7 +59,11 @@ resource "aws_db_instance" "this" {
 
   allocated_storage     = var.db_allocated_storage
   max_allocated_storage = var.db_allocated_storage * 2
-  storage_type          = "gp3"
+  # gp2 rather than gp3: gp3 has a minimum IOPS/throughput floor that many AZs
+  # cannot satisfy for db.t4g.micro, and us-east-1 rejects the combination with
+  # InsufficientDBInstanceCapacity. gp2 is universally available at this size.
+  # Revisit if the instance class grows past db.t4g.medium.
+  storage_type          = "gp2"
   storage_encrypted     = true
   kms_key_id            = aws_kms_key.secrets.arn
 

@@ -109,9 +109,9 @@ variable "db_instance_class" {
 }
 
 variable "db_engine_version" {
-  description = "PostgreSQL engine version."
+  description = "PostgreSQL engine version. Must be an engine version actually offered in the target region — list them with: aws rds describe-db-engine-versions --engine postgres --query 'DBEngineVersions[].EngineVersion' --output text"
   type        = string
-  default     = "16.3"
+  default     = "16.15"
 }
 
 variable "db_allocated_storage" {

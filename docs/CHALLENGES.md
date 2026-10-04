@@ -131,3 +131,77 @@ endorsement. Before this account holds anything of value:
 **Takeaway.** "It works" is not the same as "it is safe." Flagging it in writing is the minimum
 responsible move when the call is to accept the risk; the fix is a five-minute IAM change and there
 is no reason to skip it past the demo.
+
+## 12. A KMS key without a policy is not usable by CloudWatch Logs
+**Symptom.** First `terraform apply` failed on the log group:
+
+```
+AccessDeniedException: The specified KMS key does not exist or is not allowed to be used
+with Arn 'arn:aws:logs:us-east-1:...:log-group:/ecs/notes-staging/app'
+```
+
+The key existed and the caller had `kms:*`. The error is misleading — it is not about the caller.
+
+**Resolution.** CloudWatch Logs encrypts *on the caller's behalf*, so IAM alone is not enough; the
+key policy itself must name `logs.<region>.amazonaws.com` as a principal (RDS needs the same for
+storage encryption, and both are scoped with conditions where possible). Added a five-statement
+key policy: account root keeps `kms:*` so IAM delegation still works, then explicit grants for
+CloudWatch Logs (conditioned on the log-group ARN), RDS, and Secrets Manager.
+
+**Takeaway.** When a service encrypts something for you rather than you encrypting it, the trust
+has to live in the key policy. And "does not exist or is not allowed" from KMS almost always means
+*policy*, not existence — the error text sends you looking in the wrong place.
+
+## 13. Pinning a PostgreSQL engine version that the region does not offer
+**Symptom.** Second failure on the same apply:
+
+```
+InvalidParameterCombination: Cannot find version 16.3 for postgres
+```
+
+`16.3` was written from memory. Engine versions are regional and roll forward constantly; older
+minors age out.
+
+**Resolution.** Queried the region rather than guessing —
+`aws rds describe-db-engine-versions --engine postgres --query 'DBEngineVersions[].EngineVersion'`.
+us-east-1 offers 16.9 through 16.15; pinned to `16.15` and documented the query in the variable
+description so the next person does not have to rediscover it.
+
+**Takeaway.** Never hard-code a provider-supplied version string from memory. Either query it at
+plan time or leave the attribute unset and let the provider choose. Pinned versions are good
+practice — but only when you confirm they exist.
+
+## 14. A `terraform apply` that fails halfway leaves a stale saved plan
+**Symptom.** The first apply ran in the background and died partway through, creating about
+fifty resources. Re-running `terraform apply tfplan` then refused with
+`Error: Saved plan is stale`, and the background log file was empty, so the real error was lost.
+
+**Resolution.** Re-planned from the now-partial state (`terraform plan -out=tfplan`) and re-applied
+in the foreground so the error text would be captured. Both real failures above were only visible
+this way.
+
+**Takeaway.** Two habits worth keeping: run `plan` immediately before `apply` against a state you
+know has moved, and never run the first `apply` of a large stack in the background — if it dies,
+you lose exactly the output you need. Also: `-out=tfplan` is only safe when nothing else touches
+the state in between.
+
+## 15. `db.t4g.micro` + `gp3` is not a combination every AZ can serve
+**Symptom.** Third failure on the same stack:
+
+```
+InsufficientDBInstanceCapacity: You can't create a db.t4g.micro database instance because
+there are no Availability Zones with sufficient capacity for VPC and storage type : gp3
+for db.t4g.micro.
+```
+
+Not a quota error and not a configuration error — an actual capacity constraint, and only for
+that specific pairing. `gp3` has a minimum IOPS/throughput floor that the smallest instance
+classes cannot always satisfy in a given AZ.
+
+**Resolution.** Switched `storage_type` to `gp2`, which is universally available at `db.t4g.micro`
+and has no such floor. Left a comment at the resource to revisit if the instance class ever grows
+past `db.t4g.medium`, where `gp3` becomes the better default again.
+
+**Takeaway.** "Instance class, storage type, and AZ" is the real unit of capacity planning, not
+any one of them. When AWS says "no capacity," try changing the *pairing* before concluding the
+region is full — and prefer the boring storage class for the smallest instances.
