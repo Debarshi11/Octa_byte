@@ -1,0 +1,108 @@
+{
+  "widgets": [
+    {
+      "type": "text",
+      "x": 0, "y": 0, "width": 24, "height": 2,
+      "properties": {
+        "markdown": "# ${prefix} — Application\nRequest rate · error rate · latency · recent errors"
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0, "y": 2, "width": 8, "height": 6,
+      "properties": {
+        "title": "Request rate",
+        "region": "${region}",
+        "metrics": [
+          [ "AWS/ApplicationELB", "RequestCount", "LoadBalancer", "${alb_arn}", { "stat": "Sum", "label": "Requests / minute" } ]
+        ],
+        "view": "timeSeries",
+        "stacked": false
+      }
+    },
+    {
+      "type": "metric",
+      "x": 8, "y": 2, "width": 8, "height": 6,
+      "properties": {
+        "title": "Error rate (4xx vs 5xx)",
+        "region": "${region}",
+        "metrics": [
+          [ "AWS/ApplicationELB", "HTTPCode_Target_4XX_Count", "LoadBalancer", "${alb_arn}", { "stat": "Sum", "label": "4xx" } ],
+          [ ".", "HTTPCode_Target_5XX_Count", ".", ".", { "stat": "Sum", "label": "5xx" } ],
+          [ ".", "HTTPCode_ELB_5XX_Count", ".", ".", { "stat": "Sum", "label": "5xx (ALB)" } ]
+        ],
+        "view": "timeSeries",
+        "annotations": {
+          "horizontal": [ { "label": "5xx alarm threshold (10/min)", "value": 10, "fill": "above" } ]
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 16, "y": 2, "width": 8, "height": 6,
+      "properties": {
+        "title": "Latency — p50 / p90 / p99 (s)",
+        "region": "${region}",
+        "metrics": [
+          [ "AWS/ApplicationELB", "TargetResponseTime", "LoadBalancer", "${alb_arn}", { "stat": "p50", "label": "p50" } ],
+          [ "...", { "stat": "p90", "label": "p90" } ],
+          [ "...", { "stat": "p99", "label": "p99" } ]
+        ],
+        "view": "timeSeries",
+        "annotations": {
+          "horizontal": [ { "label": "latency alarm threshold (1s)", "value": 1, "fill": "above" } ]
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0, "y": 8, "width": 8, "height": 6,
+      "properties": {
+        "title": "Response code breakdown (last hour)",
+        "region": "${region}",
+        "metrics": [
+          [ "AWS/ApplicationELB", "HTTPCode_Target_2XX_Count", "LoadBalancer", "${alb_arn}", { "stat": "Sum", "label": "2xx" } ],
+          [ ".", "HTTPCode_Target_3XX_Count", ".", ".", { "stat": "Sum", "label": "3xx" } ],
+          [ ".", "HTTPCode_Target_4XX_Count", ".", ".", { "stat": "Sum", "label": "4xx" } ],
+          [ ".", "HTTPCode_Target_5XX_Count", ".", ".", { "stat": "Sum", "label": "5xx" } ]
+        ],
+        "view": "singleValue"
+      }
+    },
+    {
+      "type": "metric",
+      "x": 8, "y": 8, "width": 8, "height": 6,
+      "properties": {
+        "title": "Latency vs consumed LCUs",
+        "region": "${region}",
+        "metrics": [
+          [ "AWS/ApplicationELB", "TargetResponseTime", "LoadBalancer", "${alb_arn}", { "stat": "Average", "label": "avg latency (s)", "yAxis": "left" } ],
+          [ ".", "ConsumedLCUs", ".", ".", { "stat": "Average", "label": "LCUs", "yAxis": "right" } ]
+        ],
+        "view": "timeSeries"
+      }
+    },
+    {
+      "type": "metric",
+      "x": 16, "y": 8, "width": 8, "height": 6,
+      "properties": {
+        "title": "Requests by target group",
+        "region": "${region}",
+        "metrics": [
+          [ "AWS/ApplicationELB", "RequestCount", "LoadBalancer", "${alb_arn}", "TargetGroup", "${tg_arn}", { "stat": "Sum", "label": "requests" } ]
+        ],
+        "view": "timeSeries"
+      }
+    },
+    {
+      "type": "log",
+      "x": 0, "y": 14, "width": 24, "height": 6,
+      "properties": {
+        "title": "Application errors (most recent 50)",
+        "region": "${region}",
+        "query": "SOURCE '${log_group}' | fields @timestamp, @message | filter @message like /error/ | sort @timestamp desc | display @timestamp, @message | limit 50",
+        "view": "table"
+      }
+    }
+  ]
+}

@@ -1,0 +1,162 @@
+name: Deploy production
+
+# MANUAL APPROVAL GATE
+# ---------------------
+# There is no `approval` keyword in GitHub Actions, so the gate is modelled with
+# a GitHub Environment named `production` that has required reviewers. This
+# workflow is bound to that environment, so GitHub blocks the `deploy` job until
+# a reviewer clicks "Approve and deploy" - and the decision is written to the
+# deployment audit log.
+#
+# Setup: repository -> Settings -> Environments -> New environment: `production`
+#        -> Required reviewers -> add the approvers.
+#
+# It also only runs on `workflow_dispatch`, so nobody can reach production by
+# merging a pull request.
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Why is this production deploy being made?"
+        required: true
+        type: string
+      image_tag:
+        description: "Image tag to promote (defaults to the sha of this run's commit)"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  id-token: write
+
+# Never run two production applies at the same time.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  TF_IN_AUTOMATION: "true"
+  TF_VAR_environment: production
+  ECR_REPOSITORY: notes-production/app
+
+jobs:
+  # ---- 1. re-verify before we risk production ---------------------------
+  verify:
+    name: Re-run tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+
+      - name: Dependency scan
+        run: npm audit --audit-level=high
+
+  # ---- 2. the gated deploy ----------------------------------------------
+  deploy:
+    name: Deploy to production
+    needs: verify
+    runs-on: ubuntu-latest
+
+    # <<< this is the manual approval step >>>
+    environment:
+      name: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.5"
+          terraform_wrapper: false
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Resolve image to promote
+        id: meta
+        run: |
+          TAG="${{ inputs.image_tag }}"
+          if [ -z "$TAG" ]; then TAG="sha-${GITHUB_SHA::12}"; fi
+          URI="${{ steps.ecr.outputs.registry }}/${ECR_REPOSITORY}:${TAG}"
+          echo "image_uri=${URI}" >> "$GITHUB_OUTPUT"
+          echo "Promoting ${URI} (reason: ${{ inputs.reason }})"
+
+      - name: Scan the image again before promotion
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: ${{ steps.meta.outputs.image_uri }}
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: terraform init
+        working-directory: terraform
+        run: terraform init -input=false
+
+      - name: terraform plan
+        working-directory: terraform
+        run: terraform plan -no-color -input=false -out=tfplan
+
+      - name: terraform apply
+        working-directory: terraform
+        run: terraform apply -input=false tfplan
+
+      - name: Roll production onto the promoted image
+        run: |
+          CLUSTER=$(terraform -chdir=terraform output -raw ecs_cluster_name)
+          SERVICE=$(terraform -chdir=terraform output -raw ecs_service_name)
+          aws ecs update-service \
+            --cluster "$CLUSTER" \
+            --service "$SERVICE" \
+            --force-new-deployment \
+            --query 'service.serviceName' \
+            --output text
+          aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"
+
+      - name: Smoke test production
+        id: smoke
+        run: |
+          URL=$(terraform -chdir=terraform output -raw app_url)
+          echo "url=${URL}" >> "$GITHUB_OUTPUT"
+          curl --fail --silent --show-error --max-time 15 "${URL}/readyz"
+          echo
+          echo "Production smoke test passed."
+
+  # ---- 3. notify --------------------------------------------------------
+  notify:
+    name: Notify Slack
+    needs: [verify, deploy]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post result to Slack
+        uses: slackapi/slack-github-action@v1.25.0
+        with:
+          payload: |
+            {
+              "text": "${{ needs.deploy.result == 'success' && ':white_check_mark:' || ':x:' }} Production deploy ${{ needs.deploy.result }} - ${{ github.repository }}@${{ github.sha }} — reason: ${{ inputs.reason }}"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

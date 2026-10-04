@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Notes</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font: 15px/1.5 system-ui, sans-serif; max-width: 42rem; margin: 2rem auto; padding: 0 1rem; }
+    h1 { font-size: 1.25rem; }
+    form { display: grid; gap: .5rem; margin-bottom: 1.5rem; }
+    input, textarea { font: inherit; padding: .5rem; border: 1px solid #8884; border-radius: 6px; }
+    button { font: inherit; padding: .5rem .9rem; border: 0; border-radius: 6px; background: #2f6feb; color: #fff; cursor: pointer; }
+    li { margin: .5rem 0; padding: .6rem .8rem; border: 1px solid #8884; border-radius: 6px; list-style: none; }
+    ul { padding: 0; }
+    .muted { opacity: .7; font-size: .85rem; }
+    .row { display: flex; gap: .5rem; }
+    .row button { background: #8883; color: inherit; }
+  </style>
+</head>
+<body>
+  <h1>Notes</h1>
+  <p class="muted">Served by <code>notes-app</code> &middot; <a href="/healthz">/healthz</a> &middot; <a href="/readyz">/readyz</a> &middot; <a href="/metrics">/metrics</a></p>
+
+  <form id="create">
+    <input id="title" placeholder="Title" required maxlength="200" />
+    <textarea id="body" placeholder="Body" rows="3" maxlength="10000"></textarea>
+    <button type="submit">Add note</button>
+  </form>
+
+  <ul id="list"></ul>
+
+  <script>
+    const list = document.getElementById('list');
+
+    async function load() {
+      const res = await fetch('/api/notes');
+      const { data } = await res.json();
+      list.innerHTML = '';
+      for (const note of data) {
+        const li = document.createElement('li');
+        li.innerHTML = `
+          <strong></strong>
+          <div class="muted body"></div>
+          <div class="row"><button data-id="${note.id}" class="del">Delete</button></div>`;
+        li.querySelector('strong').textContent = note.title;
+        li.querySelector('.body').textContent = note.body;
+        li.querySelector('.del').onclick = async () => {
+          await fetch(`/api/notes/${note.id}`, { method: 'DELETE' });
+          load();
+        };
+        list.appendChild(li);
+      }
+    }
+
+    document.getElementById('create').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const title = document.getElementById('title').value;
+      const body = document.getElementById('body').value;
+      const res = await fetch('/api/notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, body })
+      });
+      if (res.ok) { e.target.reset(); load(); }
+    });
+
+    load();
+  </script>
+</body>
+</html>

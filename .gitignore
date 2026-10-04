@@ -1,0 +1,44 @@
+# Node
+node_modules/
+npm-debug.log*
+yarn-error.log*
+coverage/
+.nyc_output/
+
+# Environment files — secrets live in AWS Secrets Manager, never here
+.env
+.env.*
+!.env.example
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+*.auto.tfvars
+tfplan
+
+# Secrets / key material — never commit
+secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Logs
+*.log
+logs/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

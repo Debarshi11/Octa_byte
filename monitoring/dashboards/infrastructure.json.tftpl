@@ -1,0 +1,140 @@
+{
+  "widgets": [
+    {
+      "type": "text",
+      "x": 0, "y": 0, "width": 24, "height": 2,
+      "properties": {
+        "markdown": "# ${prefix} — Infrastructure\nCPU · memory · task count · database · load balancer"
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0, "y": 2, "width": 8, "height": 6,
+      "properties": {
+        "title": "ECS CPU utilisation (%)",
+        "region": "${region}",
+        "metrics": [
+          [ "AWS/ECS", "CPUUtilization", "ClusterName", "${cluster}", "ServiceName", "${service}", { "stat": "Average", "label": "CPU %" } ]
+        ],
+        "period": 60,
+        "view": "timeSeries",
+        "stacked": false,
+        "annotations": {
+          "horizontal": [ { "label": "scale-out target 60%", "value": 60, "fill": "above" } ]
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 8, "y": 2, "width": 8, "height": 6,
+      "properties": {
+        "title": "ECS memory utilisation (%)",
+        "region": "${region}",
+        "metrics": [
+          [ "AWS/ECS", "MemoryUtilization", "ClusterName", "${cluster}", "ServiceName", "${service}", { "stat": "Average", "label": "Memory %" } ]
+        ],
+        "period": 60,
+        "view": "timeSeries",
+        "annotations": {
+          "horizontal": [ { "label": "scale-out target 75%", "value": 75, "fill": "above" } ]
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 16, "y": 2, "width": 8, "height": 6,
+      "properties": {
+        "title": "Running task count",
+        "region": "${region}",
+        "metrics": [
+          [ "ECS/ContainerInsights", "RunningTaskCount", "ClusterName", "${cluster}", "ServiceName", "${service}", { "stat": "Average", "label": "Running tasks" } ]
+        ],
+        "period": 60,
+        "view": "timeSeries"
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0, "y": 8, "width": 8, "height": 6,
+      "properties": {
+        "title": "RDS CPU (%)",
+        "region": "${region}",
+        "metrics": [
+          [ "AWS/RDS", "CPUUtilization", "DBInstanceIdentifier", "${db_id}", { "stat": "Average", "label": "DB CPU %" } ]
+        ],
+        "period": 60,
+        "view": "timeSeries"
+      }
+    },
+    {
+      "type": "metric",
+      "x": 8, "y": 8, "width": 8, "height": 6,
+      "properties": {
+        "title": "RDS connections and free storage",
+        "region": "${region}",
+        "metrics": [
+          [ "AWS/RDS", "DatabaseConnections", "DBInstanceIdentifier", "${db_id}", { "stat": "Average", "label": "Connections", "yAxis": "left" } ],
+          [ ".", "FreeStorageSpace", ".", ".", { "stat": "Average", "label": "Free storage (bytes)", "yAxis": "right" } ]
+        ],
+        "period": 60,
+        "view": "timeSeries"
+      }
+    },
+    {
+      "type": "metric",
+      "x": 16, "y": 8, "width": 8, "height": 6,
+      "properties": {
+        "title": "RDS read / write IOPS",
+        "region": "${region}",
+        "metrics": [
+          [ "AWS/RDS", "ReadIOPS", "DBInstanceIdentifier", "${db_id}", { "stat": "Average", "label": "Read IOPS" } ],
+          [ ".", "WriteIOPS", ".", ".", { "stat": "Average", "label": "Write IOPS" } ]
+        ],
+        "period": 60,
+        "view": "timeSeries"
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0, "y": 14, "width": 8, "height": 6,
+      "properties": {
+        "title": "ALB healthy vs unhealthy hosts",
+        "region": "${region}",
+        "metrics": [
+          [ "AWS/ApplicationELB", "HealthyHostCount", "LoadBalancer", "${alb_arn}", "TargetGroup", "${tg_arn}", { "stat": "Average", "label": "Healthy" } ],
+          [ ".", "UnHealthyHostCount", ".", ".", ".", ".", { "stat": "Average", "label": "Unhealthy" } ]
+        ],
+        "period": 60,
+        "view": "timeSeries"
+      }
+    },
+    {
+      "type": "metric",
+      "x": 8, "y": 14, "width": 8, "height": 6,
+      "properties": {
+        "title": "ALB active / new connections",
+        "region": "${region}",
+        "metrics": [
+          [ "AWS/ApplicationELB", "ActiveConnectionCount", "LoadBalancer", "${alb_arn}", { "stat": "Sum", "label": "Active" } ],
+          [ ".", "NewConnectionCount", ".", ".", { "stat": "Sum", "label": "New" } ]
+        ],
+        "period": 60,
+        "view": "timeSeries"
+      }
+    },
+    {
+      "type": "metric",
+      "x": 16, "y": 14, "width": 8, "height": 6,
+      "properties": {
+        "title": "Container network (bytes)",
+        "region": "${region}",
+        "metrics": [
+          [ "ECS/ContainerInsights", "NetworkRxBytes", "ClusterName", "${cluster}", "ServiceName", "${service}", { "stat": "Average", "label": "Rx" } ],
+          [ ".", "NetworkTxBytes", ".", ".", ".", ".", { "stat": "Average", "label": "Tx" } ]
+        ],
+        "period": 60,
+        "view": "timeSeries"
+      }
+    }
+  ]
+}

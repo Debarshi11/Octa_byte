@@ -1,0 +1,37 @@
+# Example values for the main stack. Copy to `terraform.tfvars` (gitignored) and edit.
+# No secret belongs in this file — database credentials are generated and stored
+# in AWS Secrets Manager by `secrets.tf`.
+
+aws_region  = "us-east-1"
+project     = "notes"
+environment = "staging"
+
+vpc_cidr            = "10.20.0.0/16"
+single_nat_gateway  = true
+
+container_port = 3000
+container_image = "" # empty => use the ECR repo this stack creates, tagged :latest
+
+task_cpu     = 256
+task_memory  = 512
+desired_count = 1
+min_capacity  = 1
+max_capacity  = 4
+
+log_retention_days = 14
+
+db_name                 = "notes"
+db_username             = "notes_admin"
+db_instance_class       = "db.t4g.micro"
+db_engine_version       = "16.3"
+db_allocated_storage    = 20
+db_multi_az             = false
+db_backup_retention_days = 7
+db_deletion_protection   = true
+
+alarm_email      = "" # e.g. oncall@example.com — empty skips the SNS email subscription
+monthly_budget_usd = 100
+
+tags = {
+  Owner = "platform"
+}

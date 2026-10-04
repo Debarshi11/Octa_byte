@@ -1,0 +1,169 @@
+name: Deploy staging
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write
+
+# One staging deployment at a time. Never cancel an in-flight deploy - that
+# leaves Terraform holding a state lock.
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  TF_IN_AUTOMATION: "true"
+  TF_VAR_environment: staging
+  ECR_REPOSITORY: notes-staging/app
+
+jobs:
+  # ---- 1. tests ---------------------------------------------------------
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - run: npm ci --no-audit --no-fund
+      - run: npm test -- --coverage
+
+  # ---- 2. build, scan and push the image --------------------------------
+  build:
+    name: Build and push image
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      image_uri: ${{ steps.meta.outputs.image_uri }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Compute image tag
+        id: meta
+        run: |
+          SHA="${GITHUB_SHA::12}"
+          REGISTRY="${{ steps.ecr.outputs.registry }}"
+          URI="${REGISTRY}/${ECR_REPOSITORY}"
+          echo "image_uri=${URI}:sha-${SHA}" >> "$GITHUB_OUTPUT"
+          echo "image_latest=${URI}:latest" >> "$GITHUB_OUTPUT"
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            --tag "${{ steps.meta.outputs.image_uri }}" \
+            --tag "${{ steps.meta.outputs.image_latest }}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            ./app
+
+      - name: Scan image with Trivy (fail on HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: ${{ steps.meta.outputs.image_uri }}
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Push image
+        run: |
+          docker push "${{ steps.meta.outputs.image_uri }}"
+          docker push "${{ steps.meta.outputs.image_latest }}"
+
+  # ---- 3. infrastructure + service deploy -------------------------------
+  deploy:
+    name: Deploy to staging
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: ${{ steps.smoke.outputs.url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.5"
+          terraform_wrapper: false
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: terraform init
+        working-directory: terraform
+        run: terraform init -input=false
+
+      - name: terraform apply
+        working-directory: terraform
+        run: terraform apply -auto-approve -input=false
+
+      - name: Roll the service onto the new image
+        run: |
+          CLUSTER=$(terraform -chdir=terraform output -raw ecs_cluster_name)
+          SERVICE=$(terraform -chdir=terraform output -raw ecs_service_name)
+          aws ecs update-service \
+            --cluster "$CLUSTER" \
+            --service "$SERVICE" \
+            --force-new-deployment \
+            --query 'service.serviceName' \
+            --output text
+          aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"
+
+      - name: Smoke test
+        id: smoke
+        run: |
+          URL=$(terraform -chdir=terraform output -raw app_url)
+          echo "url=${URL}" >> "$GITHUB_OUTPUT"
+          echo "Smoke testing ${URL}"
+          for i in 1 2 3 4 5; do
+            if curl --fail --silent --show-error --max-time 10 "${URL}/readyz"; then
+              echo
+              echo "Smoke test passed."
+              exit 0
+            fi
+            echo "Attempt $i failed, retrying in 10s..."
+            sleep 10
+          done
+          echo "Smoke test failed after 5 attempts."
+          exit 1
+
+  # ---- 4. notify on failure ---------------------------------------------
+  notify:
+    name: Notify Slack on failure
+    needs: [test, build, deploy]
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post to Slack
+        uses: slackapi/slack-github-action@v1.25.0
+        with:
+          payload: |
+            {
+              "text": ":x: Staging deploy failed - ${{ github.repository }}@${{ github.sha }} (${{ github.workflow }} / ${{ github.job }})"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
