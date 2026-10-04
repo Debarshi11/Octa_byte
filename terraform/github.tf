@@ -91,6 +91,88 @@ resource "aws_iam_role_policy_attachment" "github_deploy" {
   policy_arn = "arn:aws:iam::aws:policy/PowerUserAccess"
 }
 
+# PowerUserAccess is `Allow` with `NotAction` on iam:/organizations:/account:,
+# so it grants every service EXCEPT IAM. Terraform has to manage this stack's
+# five roles and its OIDC provider, so those calls come back 403
+# ("not authorized to perform iam:GetRole ... because no identity-based policy
+# allows the action").
+#
+# Scoped by resource rather than by blanket `iam:*`: the role can only touch
+# roles named notes-<environment>-* and this one OIDC provider. That is the
+# difference between "can administer the stack" and "can administer IAM".
+resource "aws_iam_role_policy" "github_deploy_stack_iam" {
+  name = "manage-stack-iam-resources"
+  role = aws_iam_role.github_deploy.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "ManageTheRolesThisStackOwns"
+        Effect = "Allow"
+        Action = [
+          "iam:GetRole",
+          "iam:CreateRole",
+          "iam:DeleteRole",
+          "iam:UpdateRole",
+          "iam:UpdateRoleDescription",
+          "iam:TagRole",
+          "iam:UntagRole",
+          "iam:ListRoleTags",
+          "iam:GetRolePolicy",
+          "iam:PutRolePolicy",
+          "iam:DeleteRolePolicy",
+          "iam:ListRolePolicies",
+          "iam:ListAttachedRolePolicies",
+          "iam:AttachRolePolicy",
+          "iam:DetachRolePolicy",
+          "iam:PassRole",
+        ]
+        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${local.name_prefix}-*"
+      },
+      {
+        Sid    = "ManageThisOIDCProvider"
+        Effect = "Allow"
+        Action = [
+          "iam:GetOpenIDConnectProvider",
+          "iam:CreateOpenIDConnectProvider",
+          "iam:DeleteOpenIDConnectProvider",
+          "iam:UpdateOpenIDConnectProviderThumbprint",
+          "iam:AddClientIDToOpenIDConnectProvider",
+          "iam:RemoveClientIDFromOpenIDConnectProvider",
+          "iam:TagOpenIDConnectProvider",
+          "iam:UntagOpenIDConnectProvider",
+          "iam:ListOpenIDConnectProviderTags",
+        ]
+        Resource = aws_iam_openid_connect_provider.github.arn
+      },
+      {
+        Sid      = "ReadAWSManagedPolicyMetadata"
+        Effect   = "Allow"
+        Action   = ["iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions"]
+        Resource = "arn:aws:iam::aws:policy/*"
+      },
+      {
+        # ECS, Application Auto Scaling and AWS Budgets all need their
+        # service-linked roles to exist first.
+        Sid      = "AllowServiceLinkedRoles"
+        Effect   = "Allow"
+        Action   = ["iam:CreateServiceLinkedRole"]
+        Resource = "arn:aws:iam::*:role/aws-service-role/*"
+        Condition = {
+          StringEquals = {
+            "iam:AWSService" = [
+              "ecs.amazonaws.com",
+              "ecs.application-autoscaling.amazonaws.com",
+              "budgets.amazonaws.com",
+            ]
+          }
+        }
+      },
+    ]
+  })
+}
+
 output "github_deploy_role_arn" {
   description = "Set this as the AWS_DEPLOY_ROLE_ARN repository variable in GitHub Actions."
   value       = aws_iam_role.github_deploy.arn

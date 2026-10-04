@@ -113,6 +113,15 @@ if this ever becomes a real production account.
 **Takeaway.** A broad-but-bounded role plus a tight trust policy is safer than a hand-rolled policy
 that someone will widen with `Action: "*"` the first time CI breaks.
 
+**Update — it did bite.** The first real `terraform apply` from CI came back with a wall of 403s:
+`iam:GetRole`, `iam:GetOpenIDConnectProvider`. `PowerUserAccess` is written as `Allow` with
+`NotAction` on `iam:*` / `organizations:*` / `account:*`, so it grants every service *except* IAM —
+and this stack owns five roles and an OIDC provider. Fixed with an inline policy scoped by
+**resource** (`role/notes-<environment>-*` and this one OIDC provider ARN) rather than by opening
+`iam:*`. That distinction is the whole point: "can administer this stack" is a much smaller grant
+than "can administer IAM", and scoping on the resource is what keeps it small. The prediction in
+the original takeaway was right; the fix is exactly the resource-scoped policy it called for.
+
 ## 11. Deploying with root account credentials
 **Symptom.** `aws sts get-caller-identity` returned `arn:aws:iam::537124981528:root`. Not an IAM
 user — the account root. Root access keys bypass every IAM policy (including the `PowerUserAccess`
