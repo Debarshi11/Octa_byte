@@ -60,6 +60,13 @@ jobs:
         id: ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+      # One immutable tag per build, never `:latest`.
+      #
+      # terraform/ecr.tf sets image_tag_mutability = IMMUTABLE, so `:latest` can
+      # only ever be pushed once and every later attempt fails with
+      # `tag invalid: ... cannot be overwritten because the tag is immutable`.
+      # An immutable repository wants a fresh tag per build -- here `sha-<commit>`
+      # -- and a task definition that names that exact tag.
       - name: Compute image tag
         id: meta
         run: |
@@ -67,7 +74,6 @@ jobs:
           REGISTRY="${{ steps.ecr.outputs.registry }}"
           URI="${REGISTRY}/${ECR_REPOSITORY}"
           echo "image_uri=${URI}:sha-${SHA}" >> "$GITHUB_OUTPUT"
-          echo "image_latest=${URI}:latest" >> "$GITHUB_OUTPUT"
 
       - name: Build Docker image
         run: |
@@ -75,7 +81,6 @@ jobs:
             --provenance=false \
             --sbom=false \
             --tag "${{ steps.meta.outputs.image_uri }}" \
-            --tag "${{ steps.meta.outputs.image_latest }}" \
             --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
             ./app
 
@@ -89,9 +94,7 @@ jobs:
           exit-code: "1"
 
       - name: Push image
-        run: |
-          docker push "${{ steps.meta.outputs.image_uri }}"
-          docker push "${{ steps.meta.outputs.image_latest }}"
+        run: docker push "${{ steps.meta.outputs.image_uri }}"
 
   # ---- 3. infrastructure + service deploy -------------------------------
   deploy:
@@ -123,16 +126,36 @@ jobs:
         working-directory: terraform
         run: terraform apply -auto-approve -input=false
 
-      - name: Roll the service onto the new image
+      # Register a fresh task definition revision pointing at THIS build's
+      # immutable tag. `--force-new-deployment` alone would simply re-run
+      # whichever image the existing revision names, which after any drift is
+      # not necessarily the image that was just built and scanned.
+      - name: Register task definition for this build
+        id: taskdef
+        env:
+          IMAGE_URI: ${{ needs.build.outputs.image_uri }}
+        run: |
+          FAMILY="notes-${TF_VAR_environment}-app"
+          CURRENT=$(aws ecs describe-task-definition --task-definition "$FAMILY" --query taskDefinition --output json)
+          NEW=$(echo "$CURRENT" | jq --arg img "$IMAGE_URI" \
+            '.containerDefinitions[0].image = $img
+             | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                   .compatibilities, .registeredAt, .registeredBy,
+                   .deregisteredAt, .enableFaultInjection)')
+          ARN=$(aws ecs register-task-definition --cli-input-json "$NEW" \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "Registered ${ARN}"
+          echo "arn=${ARN}" >> "$GITHUB_OUTPUT"
+
+      - name: Roll the service onto the new task definition
+        env:
+          TASK_DEF: ${{ steps.taskdef.outputs.arn }}
         run: |
           CLUSTER=$(terraform -chdir=terraform output -raw ecs_cluster_name)
           SERVICE=$(terraform -chdir=terraform output -raw ecs_service_name)
-          aws ecs update-service \
-            --cluster "$CLUSTER" \
-            --service "$SERVICE" \
-            --force-new-deployment \
-            --query 'service.serviceName' \
-            --output text
+          aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" \
+            --task-definition "$TASK_DEF" \
+            --query 'service.serviceName' --output text
           aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"
 
       - name: Smoke test

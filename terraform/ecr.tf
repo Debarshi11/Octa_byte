@@ -32,10 +32,10 @@ resource "aws_ecr_lifecycle_policy" "app" {
       },
       {
         rulePriority = 2
-        description  = "Keep the most recent 20 tagged images"
+        description  = "Keep the most recent 20 versioned builds"
         selection = {
           tagStatus     = "tagged"
-          tagPrefixList = ["v", "latest", "sha-"]
+          tagPrefixList = ["v", "sha-"]
           countType     = "imageCountMoreThan"
           countNumber   = 20
         }

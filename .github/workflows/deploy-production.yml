@@ -123,16 +123,34 @@ jobs:
         working-directory: terraform
         run: terraform apply -input=false tfplan
 
-      - name: Roll production onto the promoted image
+      # Same reason as staging: register a revision pinned to this exact
+      # immutable tag rather than force-redeploying whatever is already named.
+      - name: Register task definition for the promoted image
+        id: taskdef
+        env:
+          IMAGE_URI: ${{ steps.meta.outputs.image_uri }}
+        run: |
+          FAMILY="notes-${TF_VAR_environment}-app"
+          CURRENT=$(aws ecs describe-task-definition --task-definition "$FAMILY" --query taskDefinition --output json)
+          NEW=$(echo "$CURRENT" | jq --arg img "$IMAGE_URI" \
+            '.containerDefinitions[0].image = $img
+             | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                   .compatibilities, .registeredAt, .registeredBy,
+                   .deregisteredAt, .enableFaultInjection)')
+          ARN=$(aws ecs register-task-definition --cli-input-json "$NEW" \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "Registered ${ARN}"
+          echo "arn=${ARN}" >> "$GITHUB_OUTPUT"
+
+      - name: Roll production onto the promoted task definition
+        env:
+          TASK_DEF: ${{ steps.taskdef.outputs.arn }}
         run: |
           CLUSTER=$(terraform -chdir=terraform output -raw ecs_cluster_name)
           SERVICE=$(terraform -chdir=terraform output -raw ecs_service_name)
-          aws ecs update-service \
-            --cluster "$CLUSTER" \
-            --service "$SERVICE" \
-            --force-new-deployment \
-            --query 'service.serviceName' \
-            --output text
+          aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" \
+            --task-definition "$TASK_DEF" \
+            --query 'service.serviceName' --output text
           aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"
 
       - name: Smoke test production
