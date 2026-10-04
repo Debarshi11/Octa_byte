@@ -1,11 +1,12 @@
 # Challenges and resolutions
 
 ## 1. The PDF reader would not extract the assignment text
-**Symptom.** `read_file` returned `Binary file: application/pdf` and refused to attach content;
-`pdftotext` is not installed on this Windows host and `strings` was unavailable too.
+**Symptom.** The PDF reader on this host returned `Binary file: application/pdf` and would not
+extract any text; `pdftotext` is not installed on this Windows machine, and `strings` was not
+available either.
 
-**Resolution.** Installed `pdf-parse` into the session scratchpad and ran a 12-line Node script to
-pull the text out. Nothing was added to the project itself.
+**Resolution.** Installed `pdf-parse` into a throwaway directory outside the project and ran a
+12-line Node script to pull the text out. Nothing was added to the project itself.
 
 **Takeaway.** Keep a fallback path for every tool. Had I assumed `pdftotext` existed, the build
 would have started from a guess about the requirements.
