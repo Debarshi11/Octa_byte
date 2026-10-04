@@ -129,7 +129,8 @@ policy only accepts tokens from `repo:<owner>/<name>:*`.
 - **Dashboards** — created by Terraform from `monitoring/dashboards/*.json`:
   1. `infrastructure` — CPU / memory / disk / task count / DB CPU & connections
   2. `application` — request rate, 4xx/5xx rate, p90 target latency, healthy host count
-- **Alarms** — 5xx spike, p90 latency, task CPU, task memory, unhealthy hosts → SNS → Slack/email.
+- **Alarms** (8) — 5xx spike, p90 latency, unhealthy hosts, task CPU, task memory, DB CPU, DB free
+  storage, DB connections → SNS → the `alarm_email` subscriber.
 
 ## 8. Security
 

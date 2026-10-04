@@ -1,6 +1,6 @@
 # ---------------------------------------------------------------------------
-# Centralised alerting: one SNS topic fans out to email and to the Slack
-# webhook that CI also posts to on pipeline failure.
+# Centralised alerting: one SNS topic carries all eight alarms and every
+# pipeline failure notification, and emails the `alarm_email` subscriber.
 #
 # Uses the AWS-managed SNS key rather than our CMK: CloudWatch alarms publishing
 # to a CMK-encrypted topic need extra key-policy grants, and alarm notifications

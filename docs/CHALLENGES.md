@@ -264,7 +264,7 @@ than one failed run, and `.github/dependabot.yml` already covers `github-actions
 get raised as PRs rather than silently rotting.
 
 ## 18. Alarms publishing to a topic with nobody listening
-**Symptom.** Seven CloudWatch alarms published to `notes-staging-alerts` and nothing received
+**Symptom.** All eight CloudWatch alarms published to `notes-staging-alerts` and nothing received
 them. This never surfaced as an error. The dashboards looked healthy and every alarm showed a
 correct `OK` state, so it was easy to believe alerting worked.
 
