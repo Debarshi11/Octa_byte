@@ -269,8 +269,17 @@ like "this action does not exist" — it sent me looking in the wrong place agai
 Pinned `v0.36.0` in all three workflows.
 
 **Takeaway.** Never write an action version from memory. One `gh api .../tags` call is cheaper
-than one failed run, and `.github/dependabot.yml` already covers `github-actions` so the pins
-get raised as PRs rather than silently rotting.
+than one failed run.
+
+**Follow-up — Dependabot was configured and then removed.** It was wired up to keep action pins
+fresh and open PRs across npm, Terraform and Actions. It promptly filed eight major-version
+upgrade PRs — `hashicorp/aws` 5 to 6, `express` 4 to 5, `jest` 29 to 30 among them — all breaking,
+all with failing checks, and one for a chat action this project had already dropped. The brief
+asks to *scan for vulnerabilities in dependencies and containers*, not to auto-upgrade them, and
+`npm audit` plus the Trivy filesystem and image scans already cover that completely. A bot
+filing breaking-change PRs on a submission reads as clutter rather than diligence, so
+`.github/dependabot.yml` is gone and the PRs are closed. GitHub's dependency graph and security
+advisories still alert on vulnerable dependencies, so nothing in the requirement is lost.
 
 ## 18. Alarms publishing to a topic with nobody listening
 **Symptom.** All eight CloudWatch alarms published to `notes-staging-alerts` and nothing received
