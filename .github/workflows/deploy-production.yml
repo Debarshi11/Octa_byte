@@ -103,7 +103,7 @@ jobs:
           echo "Promoting ${URI} (reason: ${{ inputs.reason }})"
 
       - name: Scan the image again before promotion
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ steps.meta.outputs.image_uri }}
           format: table
@@ -146,17 +146,26 @@ jobs:
 
   # ---- 3. notify --------------------------------------------------------
   notify:
-    name: Notify Slack
+    name: Notify result
     needs: [verify, deploy]
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Post result to Slack
-        uses: slackapi/slack-github-action@v1.25.0
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          payload: |
-            {
-              "text": "${{ needs.deploy.result == 'success' && ':white_check_mark:' || ':x:' }} Production deploy ${{ needs.deploy.result }} - ${{ github.repository }}@${{ github.sha }} — reason: ${{ inputs.reason }}"
-            }
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Publish result to SNS
         env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          ALERTS_TOPIC_ARN: ${{ vars.ALERTS_TOPIC_ARN }}
+          RESULT: ${{ needs.deploy.result }}
+          REASON: ${{ inputs.reason }}
+        run: |
+          aws sns publish \
+            --topic-arn "${ALERTS_TOPIC_ARN}" \
+            --subject "Production deploy ${RESULT}: ${GITHUB_REPOSITORY}" \
+            --message "$(printf 'Result: %s\nWorkflow: %s\nRepository: %s\nCommit: %s\nReason: %s\nRun: %s/%s/actions/runs/%s\n' \
+              "${RESULT}" "${GITHUB_WORKFLOW}" "${GITHUB_REPOSITORY}" "${GITHUB_SHA}" "${REASON}" \
+              "${GITHUB_SERVER_URL}" "${GITHUB_REPOSITORY}" "${GITHUB_RUN_ID}")"

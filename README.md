@@ -99,21 +99,24 @@ npm test             # unit + integration tests (DB is stubbed)
 | `deploy-staging.yml` | push to `main` | tests → Trivy image scan → build & push to ECR → `terraform apply` staging → smoke test |
 | `deploy-production.yml` | `workflow_dispatch` | same build, `terraform apply` production — **blocked until a reviewer approves the `production` environment** |
 
-That environment approval *is* the manual gate. Failures post to Slack via
-`slackapi/slack-github-action` using an Incoming Webhook URL stored in repository secrets.
+That environment approval *is* the manual gate. Failures are published to the
+`notes-staging-alerts` SNS topic — the same topic every CloudWatch alarm uses — which emails the
+`alarm_email` subscriber. Email via SNS rather than a chat webhook keeps one notification channel
+for alarms and pipeline failures, and needs no third-party app or rotating webhook secret.
 
 ### GitHub repository configuration
 
 | Kind | Name | Value |
 | --- | --- | --- |
 | Variable | `AWS_DEPLOY_ROLE_ARN` | output `github_deploy_role_arn` from `terraform apply` |
-| Secret | `SLACK_WEBHOOK_URL` | Slack Incoming Webhook for your deploys channel |
+| Variable | `ALERTS_TOPIC_ARN` | output `alerts_topic_arn` from `terraform apply` |
 | Environment | `staging` | no required reviewers |
 | Environment | `production` | **required reviewers** — this is the manual approval step |
 
-Nothing else is stored in GitHub. There is no `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`
-anywhere: `terraform/github.tf` creates an OIDC provider and a role whose trust policy only
-accepts tokens from `repo:<owner>/<name>:*`.
+There are no GitHub secrets at all. The pipeline authenticates to AWS with OIDC and notifies
+through SNS, so there is no `AWS_ACCESS_KEY_ID`, no `AWS_SECRET_ACCESS_KEY` and no chat webhook
+URL to leak or rotate. `terraform/github.tf` creates the OIDC provider and a role whose trust
+policy only accepts tokens from `repo:<owner>/<name>:*`.
 
 ## 7. Monitoring and logging
 

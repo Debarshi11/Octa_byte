@@ -242,3 +242,47 @@ almost always a policy or format rejection — go read the resource state before
 Two things worth carrying forward: keep `--provenance=false` (or pin `BUILDKIT_EXPORT`) when
 targeting ECR, and prefer immutable *per-build* tags (`sha-<commit>`) over a mutable-looking
 `:latest` in an immutable repo — CI in `.github/workflows/` already does this.
+
+## 17. Pinning a GitHub Action version that does not exist
+**Symptom.** Every workflow run died at `Prepare all required actions`:
+
+```
+Unable to resolve action `aquasecurity/trivy-action@0.24.0`, unable to find version `0.24.0`
+```
+
+No job even started — `test`, `build` and `deploy` all aborted before executing.
+
+**Root cause.** That repository's tags are `v`-prefixed: `v0.24.0`, `v0.36.0`, and so on. I wrote
+the version without the `v`. The error says "unable to find version", which is accurate but reads
+like "this action does not exist" — it sent me looking in the wrong place again.
+
+**Resolution.** `gh api repos/aquasecurity/trivy-action/tags` returned the real list in one call.
+Pinned `v0.36.0` in all three workflows.
+
+**Takeaway.** Never write an action version from memory. One `gh api .../tags` call is cheaper
+than one failed run, and `.github/dependabot.yml` already covers `github-actions` so the pins
+get raised as PRs rather than silently rotting.
+
+## 18. Alarms publishing to a topic with nobody listening
+**Symptom.** Seven CloudWatch alarms published to `notes-staging-alerts` and nothing received
+them. This never surfaced as an error. The dashboards looked healthy and every alarm showed a
+correct `OK` state, so it was easy to believe alerting worked.
+
+**Root cause.** Two mistakes stacked:
+
+1. `aws_sns_topic_subscription.email` is `count = var.alarm_email == "" ? 0 : 1`, and
+   `alarm_email` defaults to `""`. The stack applied with defaults, so no subscription was ever
+   created. The topic existed and the alarms pointed at it — that was enough to look finished.
+2. I designed the pipeline failure notification around a chat webhook without re-reading the
+   brief, which says "Notify on failures (Slack/email)". That is an *either/or*, and I picked the
+   option that needs a third-party app and a rotating webhook secret.
+
+**Resolution.** Set `alarm_email` in a gitignored `terraform.tfvars`, replaced the webhook
+notification with `aws sns publish` to the same topic, and removed the webhook dependency
+entirely. One channel now carries both alarm and pipeline-failure notifications.
+
+**Takeaway.** An alarm that publishes into the void is not monitoring. When wiring alerting,
+verify the *delivery path* end to end — topic, subscription, and for SNS email an actual
+confirmation click, because it sits in `PendingConfirmation` and delivers nothing until then.
+And when a requirement offers a choice ("Slack/email"), reach for the cheaper one and say which
+you took and why.

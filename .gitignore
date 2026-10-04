@@ -24,6 +24,7 @@ override.tf.json
 .terraformrc
 terraform.rc
 *.auto.tfvars
+terraform.tfvars
 tfplan
 
 # Secrets / key material — never commit

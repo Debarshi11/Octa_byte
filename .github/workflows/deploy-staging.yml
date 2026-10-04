@@ -72,13 +72,15 @@ jobs:
       - name: Build Docker image
         run: |
           docker build \
+            --provenance=false \
+            --sbom=false \
             --tag "${{ steps.meta.outputs.image_uri }}" \
             --tag "${{ steps.meta.outputs.image_latest }}" \
             --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
             ./app
 
       - name: Scan image with Trivy (fail on HIGH/CRITICAL)
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ steps.meta.outputs.image_uri }}
           format: table
@@ -152,18 +154,29 @@ jobs:
           exit 1
 
   # ---- 4. notify on failure ---------------------------------------------
+  # SNS rather than a chat webhook: the brief says "notify on failures
+  # (Slack/email)" and email through SNS needs no third-party app or rotating
+  # webhook secret. It is also the same topic the CloudWatch alarms publish to,
+  # so there is one notification channel to reason about instead of two.
   notify:
-    name: Notify Slack on failure
+    name: Notify on failure
     needs: [test, build, deploy]
     if: failure()
     runs-on: ubuntu-latest
     steps:
-      - name: Post to Slack
-        uses: slackapi/slack-github-action@v1.25.0
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          payload: |
-            {
-              "text": ":x: Staging deploy failed - ${{ github.repository }}@${{ github.sha }} (${{ github.workflow }} / ${{ github.job }})"
-            }
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Publish failure to SNS
         env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          ALERTS_TOPIC_ARN: ${{ vars.ALERTS_TOPIC_ARN }}
+        run: |
+          aws sns publish \
+            --topic-arn "${ALERTS_TOPIC_ARN}" \
+            --subject "Deploy failed: ${GITHUB_WORKFLOW} in ${GITHUB_REPOSITORY}" \
+            --message "$(printf 'Workflow: %s\nJob: %s\nRepository: %s\nCommit: %s\nRun: %s/%s/actions/runs/%s\n' \
+              "${GITHUB_WORKFLOW}" "${GITHUB_JOB}" "${GITHUB_REPOSITORY}" "${GITHUB_SHA}" \
+              "${GITHUB_SERVER_URL}" "${GITHUB_REPOSITORY}" "${GITHUB_RUN_ID}")"
