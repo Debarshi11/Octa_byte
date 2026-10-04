@@ -205,3 +205,39 @@ past `db.t4g.medium`, where `gp3` becomes the better default again.
 **Takeaway.** "Instance class, storage type, and AZ" is the real unit of capacity planning, not
 any one of them. When AWS says "no capacity," try changing the *pairing* before concluding the
 region is full — and prefer the boring storage class for the smallest instances.
+
+## 16. BuildKit attestations + immutable ECR tags = a very confusing `400 Bad Request`
+**Symptom.** `docker push` pushed every layer successfully and then failed at the very last step:
+
+```
+failed commit on ref "manifest-sha256:1eb80dd4...": unexpected status from PUT request to
+https://....dkr.ecr.us-east-1.amazonaws.com/v2/notes-staging/app/manifests/latest: 400 Bad Request
+```
+
+Rebuilding with `--provenance=false --sbom=false` changed nothing. The error says nothing about
+*which* constraint was violated.
+
+**Root cause.** Two things collided:
+
+1. Docker 27's BuildKit exports an **attestation manifest** alongside the real one and pushes both
+   under a single manifest list. The very first push registered that 1,331-byte attestation stub
+   as `:latest` before the commit of the real manifest failed.
+2. `terraform/ecr.tf` sets `image_tag_mutability = "IMMUTABLE"`. Once `:latest` existed — even
+   pointing at garbage — every subsequent push to that tag was rejected. With a bare `400`, not
+   the `InvalidParameterException: tag already exists` you would hope for.
+
+So each retry looked like a fresh failure when it was really the *first* failure blocking all the
+others.
+
+**Resolution.** `aws ecr describe-images` exposed the truth immediately: `:latest` existed, and
+`imageManifestMediaType` was `application/vnd.oci.image.manifest.v1+json` with an
+`artifactMediaType` and a `1331` byte size — an attestation artifact, not an application image.
+Deleted it with `aws ecr batch-delete-image` to free the tag, rebuilt with `--provenance=false`,
+pushed clean.
+
+**Takeaway.** When a push "fails" but `describe-images` shows something already there, you are
+fighting your own earlier attempt, not the registry. And `400 Bad Request` from a registry PUT is
+almost always a policy or format rejection — go read the resource state before retrying blindly.
+Two things worth carrying forward: keep `--provenance=false` (or pin `BUILDKIT_EXPORT`) when
+targeting ECR, and prefer immutable *per-build* tags (`sha-<commit>`) over a mutable-looking
+`:latest` in an immutable repo — CI in `.github/workflows/` already does this.
