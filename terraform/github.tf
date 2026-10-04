@@ -13,7 +13,7 @@
 variable "github_repository" {
   description = "GitHub repository allowed to assume the deploy role, in `owner/name` form."
   type        = string
-  default     = "CHANGE_ME/notes-app"
+  default     = "Debarshi11/Octa_byte"
 }
 
 resource "aws_iam_openid_connect_provider" "github" {
