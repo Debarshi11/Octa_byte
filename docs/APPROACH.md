@@ -69,6 +69,36 @@ Three workflows rather than one monolith, so triggers map cleanly to risk:
 AWS auth uses **GitHub OIDC** (`AssumeRoleWithWebIdentity`), so there are no long-lived access
 keys in repository secrets to rotate or leak.
 
+## Environments: two defined, one deployed
+The brief asks for a staging deploy *and* a manual approval step before production, so both
+environments exist as deployable targets in the pipeline. Only **staging is provisioned** in AWS.
+Two reasons:
+
+- **Cost.** A second environment is a full parallel stack — its own VPC, RDS instance, ALB and
+  NAT gateway. That roughly doubles the running spend from about $2.40/day to $5/day for a
+  three-day exercise that carries no real traffic.
+- **The requirement is the gate, not the fleet.** What the brief actually specifies is the
+  *approval step* between staging and production. That is demonstrated in `deploy-production.yml`
+  — a `workflow_dispatch` bound to a `production` GitHub Environment with required reviewers —
+  exactly the same whether or not the second stack is provisioned.
+
+Promotion to a real production environment is one command, and the code is already parameterised
+for it:
+
+```bash
+cd terraform
+TF_VAR_environment=production terraform plan  -out=tfplan
+TF_VAR_environment=production terraform apply tfplan
+```
+
+Every resource is named `notes-<environment>-*`, so two stacks cannot collide, and variables
+already carry environment-specific behaviour: `deletion_protection` and Multi-AZ on in
+production, `LOG_LEVEL=info` versus `debug`, 90-day versus 14-day log retention, and
+`enable_deletion_protection` on the ALB only in production.
+
+Deploying one environment and saying so out loud felt like the better trade than quietly
+provisioning a second stack nobody would look at.
+
 ## Observability
 CloudWatch over a self-hosted Prometheus/Grafana/Loki stack:
 
