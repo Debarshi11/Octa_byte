@@ -286,3 +286,48 @@ verify the *delivery path* end to end — topic, subscription, and for SNS email
 confirmation click, because it sits in `PendingConfirmation` and delivers nothing until then.
 And when a requirement offers a choice ("Slack/email"), reach for the cheaper one and say which
 you took and why.
+
+## 19. GitHub changed the OIDC `sub` claim format and my trust policy no longer matched
+**Symptom.** With the action tag fixed, every job got as far as AWS authentication and then died
+on `Configure AWS credentials (OIDC)`:
+
+```
+Could not assume role with OIDC: Not authorized to perform sts:AssumeRoleWithWebIdentity
+```
+
+It retried for two minutes first, which ruled out a transient error — this was a condition
+mismatch.
+
+**Dead ends first.** The trust policy text and the canonical repository name matched exactly
+(`repo:Debarshi11/Octa_byte:*` vs `gh api repos/... -q .full_name` returning `Debarshi11/Octa_byte`).
+The OIDC provider was correct: right URL, `ClientIDList: ["sts.amazonaws.com"]`, right audience in
+the workflow. None of that was the problem, and the error message points at none of it.
+
+**Root cause.** GitHub now mints the `sub` claim with numeric IDs embedded:
+
+```
+sub=repo:Debarshi11@77461376/Octa_byte@1404454869:ref:refs/heads/main
+```
+
+not the `repo:OWNER/REPO:ref:...` form that essentially every blog post and AWS doc still shows.
+A `StringLike` pattern of `repo:Debarshi11/Octa_byte:*` cannot match that string under any
+wildcard expansion.
+
+**Resolution.** Stopped guessing and printed the actual claims from a throwaway `workflow_dispatch`
+job that curls `ACTIONS_ID_TOKEN_REQUEST_URL` and base64-decodes the JWT payload. Once the real
+`sub` was on screen the fix was mechanical. The trust policy now:
+
+- pins `token.actions.githubusercontent.com:repository_id` and `:repository_owner_id` with
+  `StringEquals`, which is the real security boundary — numeric IDs do not change when a repo is
+  renamed or transferred, whereas a name-based `sub` pattern does;
+- matches **both** `sub` shapes (`OWNER@OWNER_ID/REPO@REPO_ID:` and the legacy `OWNER/REPO:`) so
+  the policy keeps working through GitHub's rollout.
+
+**Takeaway.** Three things worth keeping. First, when a federated-auth condition silently fails,
+print the token and read the claims — it is five lines of shell and it beats an hour of reading
+documentation that describes a format the issuer no longer emits. Second, pin on stable numeric
+identifiers (`repository_id`, `repository_owner_id`) rather than names; names are mutable and are
+exactly the thing attackers can influence by forking or renaming. Third, `Not authorized to
+perform sts:AssumeRoleWithWebIdentity` is an opaque umbrella — it covers a bad audience, a bad
+subject, a bad provider and a bad thumbprint alike, so it tells you *where* to look but never
+*what* is wrong.

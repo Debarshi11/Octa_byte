@@ -16,6 +16,23 @@ variable "github_repository" {
   default     = "Debarshi11/Octa_byte"
 }
 
+variable "github_repository_id" {
+  description = "GitHub numeric repository ID - the `repository_id` OIDC claim. From: gh api repos/<owner>/<name> -q .id"
+  type        = string
+  default     = "1404454869"
+}
+
+variable "github_repository_owner_id" {
+  description = "GitHub numeric owner ID - the `repository_owner_id` OIDC claim. From: gh api users/<owner> -q .id"
+  type        = string
+  default     = "77461376"
+}
+
+locals {
+  github_owner = split("/", var.github_repository)[0]
+  github_repo  = split("/", var.github_repository)[1]
+}
+
 resource "aws_iam_openid_connect_provider" "github" {
   url             = "https://token.actions.githubusercontent.com"
   client_id_list  = ["sts.amazonaws.com"]
@@ -27,6 +44,16 @@ resource "aws_iam_openid_connect_provider" "github" {
 resource "aws_iam_role" "github_deploy" {
   name = "${local.name_prefix}-github-deploy"
 
+  # GitHub changed the OIDC `sub` claim format. It used to be
+  #     repo:OWNER/REPO:ref:refs/heads/main
+  # and is now
+  #     repo:OWNER@OWNER_ID/REPO@REPO_ID:ref:refs/heads/main
+  # with `:environment:<name>` in place of `:ref:...` for jobs bound to a GitHub
+  # Environment. Both shapes are matched so this survives the transition.
+  #
+  # The actual pinning is the numeric `repository_id` and `repository_owner_id`
+  # conditions: those are stable and cannot be spoofed by renaming or
+  # transferring the repository, whereas a name-based `sub` pattern can.
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
@@ -35,10 +62,15 @@ resource "aws_iam_role" "github_deploy" {
       Action    = "sts:AssumeRoleWithWebIdentity"
       Condition = {
         StringEquals = {
-          "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
+          "token.actions.githubusercontent.com:aud"                 = "sts.amazonaws.com"
+          "token.actions.githubusercontent.com:repository_id"       = var.github_repository_id
+          "token.actions.githubusercontent.com:repository_owner_id" = var.github_repository_owner_id
         }
         StringLike = {
-          "token.actions.githubusercontent.com:sub" = "repo:${var.github_repository}:*"
+          "token.actions.githubusercontent.com:sub" = [
+            "repo:${local.github_owner}@${var.github_repository_owner_id}/${local.github_repo}@${var.github_repository_id}:*",
+            "repo:${var.github_repository}:*",
+          ]
         }
       }
     }]
